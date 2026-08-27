@@ -37,7 +37,22 @@ def source_row():
 
 def full_subject(ogrn: str = "1021600000001", name: str = "ПАО ТЕСТОВЫЙ ОПЕРАТОР"):
     return {
-        "data": {"person": {}, "organization": {"ogrn": ogrn, "name": name, "shortName": "ПАО ТЕСТ"}},
+        "data": {
+            "person": {},
+            "organization": {
+                "ogrn": ogrn,
+                "inn": "1655000000",
+                "name": name,
+                "shortName": "ПАО ТЕСТ",
+                "organizationalForm": {"code": "12247", "name": "Публичные акционерные общества"},
+                "registrationAddress": {"postalCode": "420000", "unrecognizablePart": "г. Казань"},
+            },
+        },
+        "xsdData": {
+            "phone": "+7 843 000-00-00",
+            "email": "operator@example.test",
+            "factAddress": {"postalCode": "420000", "unrecognizablePart": "г. Казань"},
+        },
         "kind": {
             "name": "Участник",
             "type": "participant",
