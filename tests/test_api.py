@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from rkn010_migration.api import ApiError, PgsClient
+from rkn010_migration.api import ApiError, CurlSession, PgsClient
 
 
 class Response:
@@ -58,6 +58,19 @@ def test_accepts_custom_ca_bundle(tmp_path):
     session = Session([])
     PgsClient("https://example", session=session, verify_tls=ca_bundle)
     assert session.verify == str(ca_bundle)
+
+
+def test_curl_transport_is_selectable():
+    client = PgsClient("https://example", transport="curl")
+    assert isinstance(client.session, CurlSession)
+
+
+def test_auth_test_uses_supported_empty_search():
+    session = Session([Response(data={"content": []})])
+    client = PgsClient("https://example", session=session)
+    client.auth_test()
+    sent = json.loads(session.calls[0][2]["data"].decode("utf-8"))
+    assert sent == {"search": {"search": []}, "size": 1}
 
 
 def test_update_requires_id_and_guid():

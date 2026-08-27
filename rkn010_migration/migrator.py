@@ -116,6 +116,7 @@ class Migrator:
         execute: bool,
         strict_org_name: bool = True,
         operator_mode: bool = False,
+        organization_id: str | None = None,
     ) -> None:
         self.client = client
         self.state = state
@@ -124,6 +125,7 @@ class Migrator:
         self.execute = execute
         self.strict_org_name = strict_org_name
         self.operator_mode = operator_mode
+        self.organization_id = organization_id
         self.summary = MigrationSummary()
         self._organization_cache: dict[str, dict[str, Any]] = {}
 
@@ -136,15 +138,18 @@ class Migrator:
         if plan.ogrn in self._organization_cache:
             return self._organization_cache[plan.ogrn]
         client = self._require_client()
+        conditions = [
+            {"field": "ogrn", "operator": "eq", "value": plan.ogrn}
+        ]
+        if self.organization_id:
+            conditions.append({"field": "_id", "operator": "eq", "value": self.organization_id})
         result = client.search(
             ORGANIZATION_COLLECTION,
             {
                 "search": {
                     "search": [
                         {
-                            "andSubConditions": [
-                                {"field": "ogrn", "operator": "eq", "value": plan.ogrn}
-                            ]
+                            "andSubConditions": conditions
                         }
                     ]
                 },

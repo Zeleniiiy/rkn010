@@ -2,12 +2,88 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 import requests
+
+
+class CurlResponse:
+    def __init__(self, status_code: int, body: bytes):
+        self.status_code = status_code
+        self.text = body.decode("utf-8-sig", errors="replace")
+
+    def json(self) -> Any:
+        return json.loads(self.text)
+
+
+class CurlSession:
+    """Small requests-compatible session using Windows curl/Schannel.
+
+    Authentication headers are passed through curl's stdin config so JWT and
+    cookies never appear in the process command line.
+    """
+
+    def __init__(self, executable: str = "curl.exe") -> None:
+        self.executable = executable
+        self.headers: dict[str, str] = {}
+        self.trust_env = False
+        self.verify: bool | str = True
+
+    @staticmethod
+    def _config_value(value: str) -> str:
+        return value.replace("\\", "\\\\").replace('"', '\\"').replace("\r", "").replace("\n", " ")
+
+    def request(self, method: str, url: str, **kwargs: Any) -> CurlResponse:
+        timeout = int(kwargs.get("timeout") or 60)
+        data = kwargs.get("data")
+        config = "\n".join(
+            f'header = "{self._config_value(name)}: {self._config_value(str(value))}"'
+            for name, value in self.headers.items()
+        ) + "\n"
+        with tempfile.TemporaryDirectory(prefix="rkn010-curl-") as directory:
+            temp = Path(directory)
+            response_path = temp / "response.bin"
+            command = [
+                self.executable,
+                "--config", "-",
+                "--compressed",
+                "--silent",
+                "--show-error",
+                "--max-time", str(timeout),
+                "--request", method,
+                "--url", url,
+                "--output", str(response_path),
+                "--write-out", "%{http_code}",
+            ]
+            if self.verify is False:
+                command.append("--insecure")
+            elif isinstance(self.verify, str):
+                command.extend(["--cacert", self.verify])
+            if data is not None:
+                request_path = temp / "request.bin"
+                request_path.write_bytes(data if isinstance(data, bytes) else str(data).encode("utf-8"))
+                command.extend(["--data-binary", f"@{request_path}"])
+            result = subprocess.run(
+                command,
+                input=config,
+                text=True,
+                capture_output=True,
+                timeout=timeout + 5,
+                check=False,
+            )
+            if result.returncode != 0:
+                raise requests.RequestException(result.stderr.strip() or f"curl exit code {result.returncode}")
+            try:
+                status_code = int(result.stdout.strip())
+            except ValueError as exc:
+                raise requests.RequestException("curl did not return an HTTP status") from exc
+            body = response_path.read_bytes() if response_path.exists() else b""
+            return CurlResponse(status_code, body)
 
 
 class ApiError(RuntimeError):
@@ -44,13 +120,21 @@ class PgsClient:
         cookie_file: Path | None = None,
         timeout: int = 60,
         verify_tls: bool | str | Path = True,
+        transport: str = "requests",
         session: requests.Session | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.token_file = token_file
         self.cookie_file = cookie_file
         self.timeout = timeout
-        self.session = session or requests.Session()
+        if session is not None:
+            self.session = session
+        elif transport == "curl":
+            self.session = CurlSession()
+        elif transport == "requests":
+            self.session = requests.Session()
+        else:
+            raise ValueError(f"Unknown HTTP transport: {transport}")
         self.session.trust_env = False
         self.session.verify = str(verify_tls) if isinstance(verify_tls, Path) else verify_tls
         self.session.headers.update(
@@ -161,7 +245,7 @@ class PgsClient:
         self.search(
             "organizations",
             {
-                "search": {"search": [{"field": "_id", "operator": "notNull"}]},
+                "search": {"search": []},
                 "size": 1,
             },
         )

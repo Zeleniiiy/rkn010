@@ -30,6 +30,7 @@ def add_profile_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--jwt-url")
     parser.add_argument("--token-file", type=Path)
     parser.add_argument("--cookie-file", type=Path)
+    parser.add_argument("--transport", choices=("requests", "curl"), default="requests")
     parser.add_argument("--timeout", type=int, default=60)
     parser.add_argument(
         "--ca-bundle",
@@ -55,6 +56,7 @@ def make_client(args, profile) -> PgsClient:
         cookie_file=args.cookie_file or auth_dir / "cookie.md",
         timeout=args.timeout,
         verify_tls=verify_tls,
+        transport=args.transport,
     )
 
 
@@ -86,6 +88,12 @@ def command_run(args) -> int:
     data = read_workbook(workbook, args.sheet)
     raise_for_errors(data)
     plans = build_plan(data)
+    if args.ogrn:
+        plans = [plan for plan in plans if plan.ogrn == args.ogrn]
+    if args.zone:
+        plans = [plan for plan in plans if plan.geo_zone == args.zone]
+    if (args.ogrn or args.zone) and not plans:
+        raise SystemExit("No migration groups match the requested OGRN/zone")
     if args.limit:
         plans = plans[: args.limit]
     plan_path = run_dir / "plan.json"
@@ -113,6 +121,7 @@ def command_run(args) -> int:
         execute=True,
         strict_org_name=not args.allow_org_name_mismatch,
         operator_mode=args.operator_mode,
+        organization_id=args.organization_id,
     )
     summary = migrator.migrate(plans)
     (run_dir / "summary.json").write_text(json.dumps(summary.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
@@ -154,6 +163,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--operator-mode", action="store_true")
     run.add_argument("--allow-org-name-mismatch", action="store_true")
     run.add_argument("--limit", type=int)
+    run.add_argument("--ogrn")
+    run.add_argument("--zone")
+    run.add_argument("--organization-id")
     run.add_argument("--verbose", action="store_true")
     add_profile_args(run)
     run.set_defaults(func=command_run)
