@@ -147,3 +147,27 @@ def test_second_run_is_idempotent(tmp_path, source_row):
     assert summary.licenses_created == 0
     assert summary.records_created == 0
     assert not [op for op in client.operations if op[0] == "create"]
+
+
+def test_incomplete_subject_is_created_with_warning(tmp_path, source_row):
+    row = source_row()
+    plan = LicensePlan(row.license_key, row.ogrn, row.geo_zone, [row], "active")
+    client = FakeClient()
+    client.collections["organizations"] = [
+        {
+            "ogrn": row.ogrn,
+            "name": row.org_name,
+            "shortName": row.short_org_name,
+        }
+    ]
+    run_dir = tmp_path / "incomplete"
+
+    summary = make_migrator(tmp_path, client, "incomplete").migrate([plan])
+
+    assert summary.groups_completed == 1
+    assert summary.licenses_created == 1
+    assert summary.records_created == 1
+    assert '"event": "subject_incomplete"' in (run_dir / "events.jsonl").read_text(encoding="utf-8")
+    subject = client.collections["RKN010_Licenses"][0]["subject"]
+    assert subject["data"]["organization"]["ogrn"] == row.ogrn
+    assert "inn" not in subject["data"]["organization"]

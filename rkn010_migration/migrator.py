@@ -227,7 +227,12 @@ class Migrator:
             subject = build_subject(self._search_organization(plan), plan.latest)
         missing = validate_subject(subject)
         if missing:
-            raise MigrationError(f"{plan.key}: у субъекта отсутствуют обязательные поля: {', '.join(missing)}")
+            self.logger.warning(
+                "%s: субъект будет создан с незаполненными полями: %s",
+                plan.key,
+                ", ".join(missing),
+            )
+            self.events.write("subject_incomplete", key=plan.key, missing_fields=missing)
         return subject
 
     def write_dry_run(self, plans: list[LicensePlan], output: Path) -> MigrationSummary:
