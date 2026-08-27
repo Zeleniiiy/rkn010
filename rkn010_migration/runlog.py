@@ -35,4 +35,3 @@ class JsonlWriter:
         }
         with self.path.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
-

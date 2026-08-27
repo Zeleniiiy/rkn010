@@ -39,4 +39,3 @@ def test_rollback_restores_updates_then_deletes_in_reverse(tmp_path):
     ]
     assert result["restored"] == 1
     assert result["deleted"] == 2
-

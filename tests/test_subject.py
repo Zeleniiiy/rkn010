@@ -23,4 +23,3 @@ def test_builds_subject_wrapper_from_organization_card(source_row):
     )
     assert subject["specialTypeId"] == "ulApplicant"
     assert validate_subject(subject) == []
-

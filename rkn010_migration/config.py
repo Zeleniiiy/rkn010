@@ -40,4 +40,3 @@ class RunSettings:
     verify_tls: bool = True
     token_file: Path | None = None
     cookie_file: Path | None = None
-

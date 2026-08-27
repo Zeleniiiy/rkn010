@@ -24,4 +24,3 @@ include = ["rkn010_migration*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
-

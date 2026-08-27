@@ -39,4 +39,3 @@
 - `tests/test_subject.py` — форматы ответа `organizations` и проверка субъекта.
 - `tests/test_migrator.py` — полный fake API, безопасный порядок и идемпотентный повтор.
 - `tests/test_state.py` — порядок rollback.
-

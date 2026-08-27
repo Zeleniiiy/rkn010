@@ -13,4 +13,3 @@ if (-not (Test-Path -LiteralPath $pythonPath)) {
 & $pythonPath -m pip install --upgrade pip
 & $pythonPath -m pip install -r (Join-Path $repositoryRoot "requirements.txt")
 & $pythonPath -m pytest
-

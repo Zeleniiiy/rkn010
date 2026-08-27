@@ -52,4 +52,3 @@ def resolve_profile(
         jwt_url=(jwt_url or base.jwt_url or "").rstrip("/"),
         production=base.production or name.lower() in {"prod", "production"},
     )
-

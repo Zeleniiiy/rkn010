@@ -7,4 +7,3 @@ param(
 )
 & (Join-Path $PSScriptRoot "run.ps1") -Profile psi -Workbook $Workbook -Execute:$Execute -OperatorMode:$OperatorMode -Limit $Limit
 exit $LASTEXITCODE
-

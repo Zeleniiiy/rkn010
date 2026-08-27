@@ -49,4 +49,3 @@ def full_subject(ogrn: str = "1021600000001", name: str = "ПАО ТЕСТОВЫ
         "entityType": "subjects",
         "parentEntries": "RKN010Appeals.subjects",
     }
-

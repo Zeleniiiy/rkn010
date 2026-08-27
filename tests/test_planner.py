@@ -28,4 +28,3 @@ def test_latest_exclusion_annuls_license_only(source_row):
     )
     plan = build_plan(WorkbookData("x", "РОСЗСП", [latest, older], []))[0]
     assert plan.license_status == "annulled"
-

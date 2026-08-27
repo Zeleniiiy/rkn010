@@ -95,4 +95,3 @@ def rollback(client, state_path: Path, *, dry_run: bool = True) -> dict[str, int
         "restored": restored,
         "deleted": deleted,
     }
-

@@ -14,4 +14,3 @@ def test_custom_profile_requires_url():
     with pytest.raises(ValueError):
         resolve_profile("demo")
     assert resolve_profile("demo", base_url="https://demo/").base_url == "https://demo"
-

@@ -86,4 +86,3 @@ class WorkbookData:
     @property
     def errors(self) -> list[ValidationIssue]:
         return [issue for issue in self.issues if issue.severity == "error"]
-

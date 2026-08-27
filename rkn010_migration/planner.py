@@ -52,4 +52,3 @@ def build_plan(data: WorkbookData) -> list[LicensePlan]:
             )
         )
     return sorted(plans, key=lambda item: (item.ogrn, int(item.geo_zone)))
-

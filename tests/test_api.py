@@ -56,4 +56,3 @@ def test_update_requires_id_and_guid():
     client = PgsClient("https://example", session=Session([]))
     with pytest.raises(ApiError):
         client.update("RKN010_Records", {"status": "active"})
-

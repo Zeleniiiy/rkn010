@@ -73,4 +73,3 @@ def test_rejects_compound_numbering_zone(tmp_path):
     make_book(path, zone="843;855")
     data = read_workbook(path)
     assert any(issue.code == "geo_zone_format" for issue in data.errors)
-
