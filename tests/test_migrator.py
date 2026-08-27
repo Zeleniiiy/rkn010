@@ -171,3 +171,33 @@ def test_incomplete_subject_is_created_with_warning(tmp_path, source_row):
     subject = client.collections["RKN010_Licenses"][0]["subject"]
     assert subject["data"]["organization"]["ogrn"] == row.ogrn
     assert "inn" not in subject["data"]["organization"]
+
+
+def test_duplicate_organizations_selects_most_complete_subject(tmp_path, source_row):
+    row = source_row()
+    plan = LicensePlan(row.license_key, row.ogrn, row.geo_zone, [row], "active")
+    client = FakeClient()
+    client.collections["organizations"] = [
+        {
+            "_id": "incomplete",
+            "ogrn": row.ogrn,
+            "name": row.org_name,
+            "shortName": row.short_org_name,
+        },
+        {
+            "_id": "complete",
+            "ogrn": row.ogrn,
+            "name": row.org_name,
+            "subject": full_subject(),
+        },
+    ]
+    run_dir = tmp_path / "duplicates"
+
+    summary = make_migrator(tmp_path, client, "duplicates").migrate([plan])
+
+    assert summary.groups_completed == 1
+    subject = client.collections["RKN010_Licenses"][0]["subject"]
+    assert subject["data"]["organization"]["inn"] == "1655000000"
+    events = (run_dir / "events.jsonl").read_text(encoding="utf-8")
+    assert '"event": "organization_duplicate_selected"' in events
+    assert '"selected_id": "complete"' in events

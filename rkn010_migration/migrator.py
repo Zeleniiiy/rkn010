@@ -153,12 +153,45 @@ class Migrator:
                         }
                     ]
                 },
-                "size": 2,
+                "size": 100,
             },
         )
         hits = _content(result)
-        if len(hits) != 1:
-            raise MigrationError(f"ОГРН {plan.ogrn}: найдено организаций {len(hits)}, ожидалась одна")
+        if not hits:
+            raise MigrationError(f"ОГРН {plan.ogrn}: организация не найдена")
+        if len(hits) > 1:
+            source_name = _normalise_name(plan.latest.org_name)
+
+            def candidate_score(hit: dict[str, Any]) -> tuple[int, int, int, str]:
+                found_name = _normalise_name(organisation_name(hit))
+                try:
+                    missing = validate_subject(build_subject(hit, plan.latest))
+                    valid_identity = 1
+                except Exception:
+                    missing = ["invalid_subject"]
+                    valid_identity = 0
+                return (
+                    valid_identity,
+                    int(bool(found_name) and found_name == source_name),
+                    -len(missing),
+                    str(hit.get("_id") or ""),
+                )
+
+            hits = sorted(hits, key=candidate_score, reverse=True)
+            selected_id = hits[0].get("_id")
+            candidate_ids = [hit.get("_id") for hit in hits]
+            self.logger.warning(
+                "ОГРН %s: найдено карточек %s, выбрана %s",
+                plan.ogrn,
+                len(hits),
+                selected_id,
+            )
+            self.events.write(
+                "organization_duplicate_selected",
+                ogrn=plan.ogrn,
+                selected_id=selected_id,
+                candidate_ids=candidate_ids,
+            )
         found_name = organisation_name(hits[0])
         if self.strict_org_name and found_name and _normalise_name(found_name) != _normalise_name(plan.latest.org_name):
             raise MigrationError(
