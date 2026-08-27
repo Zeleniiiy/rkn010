@@ -38,5 +38,6 @@ class RunSettings:
     limit: int | None = None
     timeout_seconds: int = 60
     verify_tls: bool = True
+    ca_bundle: Path | None = None
     token_file: Path | None = None
     cookie_file: Path | None = None

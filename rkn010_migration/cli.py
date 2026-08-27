@@ -31,18 +31,30 @@ def add_profile_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--token-file", type=Path)
     parser.add_argument("--cookie-file", type=Path)
     parser.add_argument("--timeout", type=int, default=60)
+    parser.add_argument(
+        "--ca-bundle",
+        type=Path,
+        help="PEM-файл доверенного центра сертификации для этого стенда",
+    )
     parser.add_argument("--no-verify-tls", action="store_true")
     parser.add_argument("--confirm-prod", action="store_true")
 
 
 def make_client(args, profile) -> PgsClient:
     auth_dir = Path("auth") / profile.name
+    ca_bundle = args.ca_bundle
+    if ca_bundle is None:
+        default_ca = auth_dir / "ca.pem"
+        ca_bundle = default_ca if default_ca.exists() else None
+    if args.no_verify_tls and ca_bundle is not None:
+        raise SystemExit("Use either --ca-bundle or --no-verify-tls, not both")
+    verify_tls = False if args.no_verify_tls else (ca_bundle or True)
     return PgsClient(
         profile.base_url,
         token_file=args.token_file or auth_dir / "token.md",
         cookie_file=args.cookie_file or auth_dir / "cookie.md",
         timeout=args.timeout,
-        verify_tls=not args.no_verify_tls,
+        verify_tls=verify_tls,
     )
 
 

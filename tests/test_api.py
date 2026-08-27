@@ -52,6 +52,14 @@ def test_retries_server_error_and_accepts_second_response():
     assert len(session.calls) == 2
 
 
+def test_accepts_custom_ca_bundle(tmp_path):
+    ca_bundle = tmp_path / "ca.pem"
+    ca_bundle.write_text("test certificate", encoding="utf-8")
+    session = Session([])
+    PgsClient("https://example", session=session, verify_tls=ca_bundle)
+    assert session.verify == str(ca_bundle)
+
+
 def test_update_requires_id_and_guid():
     client = PgsClient("https://example", session=Session([]))
     with pytest.raises(ApiError):

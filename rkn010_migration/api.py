@@ -43,7 +43,7 @@ class PgsClient:
         token_file: Path | None = None,
         cookie_file: Path | None = None,
         timeout: int = 60,
-        verify_tls: bool = True,
+        verify_tls: bool | str | Path = True,
         session: requests.Session | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -52,7 +52,7 @@ class PgsClient:
         self.timeout = timeout
         self.session = session or requests.Session()
         self.session.trust_env = False
-        self.session.verify = verify_tls
+        self.session.verify = str(verify_tls) if isinstance(verify_tls, Path) else verify_tls
         self.session.headers.update(
             {
                 "Accept": "application/hal+json",
