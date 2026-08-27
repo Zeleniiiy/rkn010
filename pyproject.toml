@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rkn010-migration"
+version = "1.0.0"
+description = "Safe and resumable RKN010 migration utility"
+requires-python = ">=3.11"
+dependencies = [
+  "openpyxl>=3.1,<4",
+  "requests>=2.32,<3",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10", "pytest-cov>=5,<8"]
+
+[project.scripts]
+rkn010-migrate = "rkn010_migration.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["rkn010_migration*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+

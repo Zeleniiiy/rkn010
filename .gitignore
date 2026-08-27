@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+.deps/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local authentication and production data
+auth/
+*.token
+*.cookie
+input/
+*.xlsx
+*.xls
+
+# Runtime artifacts
+runs/
+logs/
+state/
+rollback/
+.docx_review/
