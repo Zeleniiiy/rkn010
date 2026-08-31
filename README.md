@@ -37,6 +37,26 @@ auth/dev/token.md
 auth/dev/cookie.md
 auth/prod/token.md
 auth/prod/cookie.md
+auth/custom/token.md
+auth/custom/cookie.md
+```
+
+Каталоги `auth/dev`, `auth/psi`, `auth/prod`, `auth/custom` и аналогичные
+каталоги `input/<profile>` входят в репозиторий как безопасный каркас.
+`scripts/bootstrap.ps1` создаёт отсутствующие локальные `token.md` и
+`cookie.md`, не перезаписывая уже заполненные файлы. В Git сохраняются только
+`.gitkeep`, примеры и пояснения — реальные Cookie, JWT, CA-цепочки и Excel-файлы
+игнорируются.
+
+Рабочую книгу можно хранить в `input/dev`, `input/psi`, `input/prod` или
+`input/custom`; в команду запуска всё равно передаётся её полный путь.
+
+Проверка авторизации отдельными командами:
+
+```powershell
+.\scripts\auth-dev.ps1
+.\scripts\auth-psi.ps1
+.\scripts\auth-prod.ps1
 ```
 
 Если стенд использует ведомственный центр сертификации, положите его цепочку
@@ -67,6 +87,16 @@ Dry-run для PSI:
 .\scripts\run-psi.ps1 -Workbook "C:\path\migration.xlsx" -Execute -OperatorMode
 ```
 
+Обёртки `run-dev.ps1`, `run-psi.ps1` и `run-prod.ps1` используют раздельные
+профили и авторизационные файлы. Для дополнительного контура:
+
+```powershell
+.\scripts\run-custom.ps1 -BaseUrl "https://api.example" -Workbook "C:\path\migration.xlsx"
+```
+
+По умолчанию эта команда использует `auth/custom`. Если задать другое имя
+через `-Profile`, нужно создать совпадающий каталог `auth/<profile>`.
+
 Запись на PROD требует отдельного подтверждения:
 
 ```powershell
@@ -94,6 +124,14 @@ Dry-run для PSI:
 
 ```powershell
 .venv\Scripts\python.exe -m rkn010_migration rollback --profile psi --state "runs\psi\...\checkpoint.json" --execute
+```
+
+То же через профильные PowerShell-обёртки:
+
+```powershell
+.\scripts\rollback-dev.ps1 -State "C:\path\checkpoint.json"
+.\scripts\rollback-psi.ps1 -State "C:\path\checkpoint.json" -Execute
+.\scripts\rollback-prod.ps1 -State "C:\path\checkpoint.json" -Execute -ConfirmProd
 ```
 
 Подробности: [описание файлов](docs/FILES.md), [маппинг](docs/MAPPING.md), [регламент запуска](docs/OPERATIONS.md), [открытые решения](docs/OPEN_QUESTIONS.md).

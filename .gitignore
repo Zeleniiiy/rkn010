@@ -15,10 +15,46 @@ venv/
 Thumbs.db
 
 # Local authentication and production data
-auth/
+# Keep the directory scaffold and examples in Git, but never credentials.
+auth/*
+!auth/README.md
+!auth/dev/
+!auth/psi/
+!auth/prod/
+!auth/custom/
+auth/dev/*
+auth/psi/*
+auth/prod/*
+auth/custom/*
+!auth/dev/.gitkeep
+!auth/psi/.gitkeep
+!auth/prod/.gitkeep
+!auth/custom/.gitkeep
+!auth/dev/*.example.md
+!auth/psi/*.example.md
+!auth/prod/*.example.md
+!auth/custom/*.example.md
 *.token
 *.cookie
-input/
+auth/*/token.md
+auth/*/cookie.md
+auth/*/ca.pem
+
+# Migration workbooks stay local; Git contains only the per-stand scaffold.
+input/*
+!input/README.md
+!input/dev/
+!input/psi/
+!input/prod/
+!input/custom/
+input/dev/*
+input/psi/*
+input/prod/*
+input/custom/*
+!input/dev/.gitkeep
+!input/psi/.gitkeep
+!input/prod/.gitkeep
+!input/custom/.gitkeep
 *.xlsx
 *.xls
 

@@ -6,6 +6,10 @@
 - `pyproject.toml` — метаданные Python-пакета, консольная команда `rkn010-migrate` и настройки pytest.
 - `requirements.txt` — диапазоны библиотек для Excel, HTTP и тестов.
 - `.gitignore` — исключает токены, cookie, боевые Excel-файлы, локальные зависимости и результаты запусков.
+- `auth/README.md` — правила подготовки Cookie/JWT/CA для каждого контура.
+- `auth/dev`, `auth/psi`, `auth/prod`, `auth/custom` — отслеживаемый каркас профилей; рабочие секреты внутри остаются локальными.
+- `input/README.md` — правила размещения локальных Excel-файлов.
+- `input/dev`, `input/psi`, `input/prod`, `input/custom` — раздельные локальные каталоги исходных файлов по контурам.
 
 ## Пакет `rkn010_migration`
 
@@ -26,9 +30,14 @@
 
 ## Скрипты
 
-- `scripts/bootstrap.ps1` — создаёт `.venv`, ставит зависимости и запускает тесты.
-- `scripts/run.ps1` — общий запуск для штатного профиля.
+- `scripts/bootstrap.ps1` — создаёт `.venv`, локальные файлы авторизации и каталоги входных файлов, ставит зависимости и запускает тесты.
+- `scripts/auth.ps1` — общая проверка Cookie/JWT выбранного профиля.
+- `scripts/auth-dev.ps1`, `auth-psi.ps1`, `auth-prod.ps1`, `auth-custom.ps1` — короткие проверки авторизации штатных и дополнительного стендов.
+- `scripts/run.ps1` — общий запуск для штатного или пользовательского профиля.
 - `scripts/run-dev.ps1`, `run-psi.ps1`, `run-prod.ps1` — короткие команды для каждого стенда.
+- `scripts/run-custom.ps1` — запуск дополнительного стенда с явным `-BaseUrl`.
+- `scripts/rollback.ps1` — общий предварительный или фактический откат по checkpoint.
+- `scripts/rollback-dev.ps1`, `rollback-psi.ps1`, `rollback-prod.ps1`, `rollback-custom.ps1` — профильные обёртки отката.
 
 ## Тесты
 
