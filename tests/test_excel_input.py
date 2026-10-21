@@ -111,3 +111,55 @@ def test_infers_missing_end_date_only_from_the_same_license_number(tmp_path):
         issue.code == "licence_end_inferred" and issue.excel_row == 5
         for issue in data.issues
     )
+
+
+def test_reads_subject_fallback_columns_and_cleans_placeholder_values(tmp_path):
+    path = tmp_path / "subject.xlsx"
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "РОСЗСП"
+    ws.append(["Таблица миграции"])
+    ws.append([])
+    headers = HEADERS.copy()
+    insert_at = headers.index("Полное наименование")
+    headers[insert_at:insert_at] = ["ИНН", "Номер телефона", "Электронная почта", "ОПФ", "Код ОПФ"]
+    address_at = headers.index("Место нахождения") + 1
+    headers.insert(address_at, "Фактический/ Почтовый адрес")
+    ws.append(headers)
+    values = {
+        "row_uuid": "uuid",
+        "Идентификатор записи": "legacy",
+        "Регистрационный номер": "52",
+        "ОГРН": "1021600000001",
+        "ИНН": "1655000000",
+        "Номер телефона": "+7 843 000-00-00",
+        "Электронная почта": "––",
+        "ОПФ": "ПУБЛИЧНОЕ АКЦИОНЕРНОЕ ОБЩЕСТВО",
+        "Код ОПФ": "12247",
+        "Полное наименование": "ПАО ТЕСТОВЫЙ ОПЕРАТОР",
+        "Сокращенное наименование": "ПАО ТЕСТ",
+        "Место нахождения": "420000, г. Казань",
+        "Фактический/ Почтовый адрес": "420000, г. Казань",
+        "N1": "3004",
+        "Дата начала и окончания лицензии_1": "01.01.2030",
+        "Статус_1": "действующая",
+        "N2": "3004",
+        "Дата окончания лицензии_2": "01.06.2029",
+        "Статус_2": "действующая",
+        "N3": "9913",
+        "Дата начала и окончания лицензии_3": "01.01.2031",
+        "Статус_3": "действующая",
+        "Зона нумерации": "843",
+        "Номер приказа о включении": "100",
+        "Дата приказа о включении": "02.01.2020",
+    }
+    ws.append([values.get(header, "") for header in headers])
+    wb.save(path)
+
+    row = read_workbook(path).rows[0]
+
+    assert row.inn == "1655000000"
+    assert row.phone == "+7 843 000-00-00"
+    assert row.email == ""
+    assert row.organizational_form_code == "12247"
+    assert row.fact_address == "420000, г. Казань"

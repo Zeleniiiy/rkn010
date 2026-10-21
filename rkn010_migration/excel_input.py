@@ -17,9 +17,15 @@ HEADER_ALIASES: dict[str, tuple[str, ...]] = {
     "source_record_id": ("идентификатор записи",),
     "regno": ("регистрационный номер",),
     "ogrn": ("огрн",),
+    "inn": ("инн",),
+    "phone": ("номер телефона", "телефон", "phone"),
+    "email": ("электронная почта", "email", "e mail"),
+    "organizational_form": ("опф", "организационно правовая форма"),
+    "organizational_form_code": ("код опф",),
     "org_name": ("полное наименование",),
     "short_org_name": ("сокращенное наименование", "сокращенное"),
     "location": ("место нахождения",),
+    "fact_address": ("фактический почтовый адрес", "фактический адрес", "почтовый адрес"),
     "licence_number_1": ("n1", "licencenumber1", "licence number 1"),
     "licence_date_end_1": ("дата начала и окончания лицензии_1", "дата окончания лицензии_1"),
     "licence_status_1": ("статус_1", "статус 1"),
@@ -42,6 +48,7 @@ HEADER_PATTERNS: dict[str, str] = {
     "org_name": r"^полное наименование оператора",
     "short_org_name": r"^сокращенное наименование оператора",
     "location": r"^место нахождения",
+    "fact_address": r"^фактический(?:/|\s)+почтовый адрес$",
     "licence_number_1": r"^номера лицензий n1",
     "licence_date_end_1": r"^дата (?:начала и )?окончания лицензии ?1$",
     "licence_status_1": r"^статус ?1$",
@@ -60,6 +67,24 @@ HEADER_PATTERNS: dict[str, str] = {
 
 OPTIONAL_COLUMNS = {
     "expert_opinion_date",
+    "inn",
+    "phone",
+    "email",
+    "organizational_form",
+    "organizational_form_code",
+    "fact_address",
+}
+
+SUBJECT_FIELDS = {
+    "inn",
+    "phone",
+    "email",
+    "organizational_form",
+    "organizational_form_code",
+    "org_name",
+    "short_org_name",
+    "location",
+    "fact_address",
 }
 
 REQUIRED_FIELDS = {
@@ -100,6 +125,15 @@ def _text(value: Any) -> str:
     if isinstance(value, float) and value.is_integer():
         return str(int(value))
     return str(value).strip()
+
+
+def _subject_text(value: Any) -> str:
+    text = _text(value)
+    if not text or re.fullmatch(r"[\s\-\u2013\u2014_.;,]+", text):
+        return ""
+    if text.casefold() in {"нет", "не указано", "отсутствует", "н/д", "n/a"}:
+        return ""
+    return text
 
 
 def _license_number(value: Any) -> str:
@@ -217,7 +251,7 @@ def read_workbook(path: str | Path, sheet_name: str | None = None) -> WorkbookDa
         if not any(value not in (None, "") for value in raw.values()):
             continue
         values = {
-            field: _text(raw.get(field))
+            field: _subject_text(raw.get(field)) if field in SUBJECT_FIELDS else _text(raw.get(field))
             for field in HEADER_ALIASES
         }
         for slot in (1, 2, 3):
@@ -263,9 +297,15 @@ def read_workbook(path: str | Path, sheet_name: str | None = None) -> WorkbookDa
                 source_record_id=values["source_record_id"],
                 regno=values["regno"],
                 ogrn=values["ogrn"],
+                inn=values["inn"],
+                phone=values["phone"],
+                email=values["email"],
+                organizational_form=values["organizational_form"],
+                organizational_form_code=values["organizational_form_code"],
                 org_name=values["org_name"],
                 short_org_name=values["short_org_name"],
                 location=values["location"],
+                fact_address=values["fact_address"],
                 licence_number_1=values["licence_number_1"],
                 licence_date_end_1=licence_dates[1],
                 licence_status_1=licence_statuses[1],

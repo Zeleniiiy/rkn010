@@ -228,7 +228,7 @@ def test_rollback_restores_documents_after_schema_sync(tmp_path, source_row):
     assert client.collections["RKN010_Records"] == [before_record]
 
 
-def test_incomplete_subject_is_created_with_warning(tmp_path, source_row):
+def test_incomplete_subject_from_organizations_is_skipped_without_writes(tmp_path, source_row):
     row = source_row()
     plan = LicensePlan(row.license_key, row.ogrn, row.geo_zone, [row], "active")
     client = FakeClient()
@@ -243,13 +243,52 @@ def test_incomplete_subject_is_created_with_warning(tmp_path, source_row):
 
     summary = make_migrator(tmp_path, client, "incomplete").migrate([plan])
 
-    assert summary.groups_completed == 1
-    assert summary.licenses_created == 1
-    assert summary.records_created == 1
+    assert summary.groups_completed == 0
+    assert summary.groups_skipped == 1
+    assert summary.licenses_created == 0
+    assert summary.records_created == 0
     assert '"event": "subject_incomplete"' in (run_dir / "events.jsonl").read_text(encoding="utf-8")
+    assert '"event": "group_skipped"' in (run_dir / "events.jsonl").read_text(encoding="utf-8")
+    assert client.collections["RKN010_Licenses"] == []
+    assert client.collections["RKN010_Records"] == []
+
+
+def test_missing_organization_uses_complete_excel_subject(tmp_path, source_row):
+    row = source_row()
+    plan = LicensePlan(row.license_key, row.ogrn, row.geo_zone, [row], "active")
+    client = FakeClient()
+    client.collections["organizations"] = []
+    run_dir = tmp_path / "excel-fallback"
+
+    summary = make_migrator(tmp_path, client, "excel-fallback").migrate([plan])
+
+    assert summary.groups_completed == 1
+    assert summary.groups_skipped == 0
     subject = client.collections["RKN010_Licenses"][0]["subject"]
-    assert subject["data"]["organization"]["ogrn"] == row.ogrn
-    assert "inn" not in subject["data"]["organization"]
+    assert subject["data"]["organization"]["inn"] == row.inn
+    assert subject["data"]["organization"]["organizationalForm"]["code"] == "12247"
+    assert subject["xsdData"]["email"] == row.email
+    events = (run_dir / "events.jsonl").read_text(encoding="utf-8")
+    assert '"event": "organization_not_found"' in events
+    assert '"source": "excel"' in events
+
+
+def test_missing_organization_and_incomplete_excel_subject_is_skipped(tmp_path, source_row):
+    row = source_row(phone="", email="")
+    plan = LicensePlan(row.license_key, row.ogrn, row.geo_zone, [row], "active")
+    client = FakeClient()
+    client.collections["organizations"] = []
+    run_dir = tmp_path / "excel-incomplete"
+
+    summary = make_migrator(tmp_path, client, "excel-incomplete").migrate([plan])
+    result = rollback(client, run_dir / "checkpoint.json", dry_run=False)
+
+    assert summary.groups_skipped == 1
+    assert client.collections["RKN010_Licenses"] == []
+    assert client.collections["RKN010_Records"] == []
+    assert result["updates_to_restore"] == 0
+    assert result["records_to_delete"] == 0
+    assert result["skipped_groups"] == 1
 
 
 def test_duplicate_organizations_selects_most_complete_subject(tmp_path, source_row):

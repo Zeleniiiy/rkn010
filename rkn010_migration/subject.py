@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 from typing import Any
 
 from .models import SourceRow
@@ -40,6 +41,18 @@ def _subject_kind(ip: bool) -> dict[str, Any]:
             "specialTypeId": special_type,
         },
     }
+
+
+def _address(value: str) -> dict[str, str] | None:
+    text = value.strip()
+    if not text:
+        return None
+    match = re.match(r"^(\d{6})\s*[,;]?\s*(.*)$", text)
+    if not match:
+        return {"unrecognizablePart": text}
+    result = {"postalCode": match.group(1)}
+    result["unrecognizablePart"] = match.group(2) or text
+    return result
 
 
 def organisation_name(hit: dict[str, Any]) -> str:
@@ -116,6 +129,42 @@ def build_subject(hit: dict[str, Any], source: SourceRow) -> dict[str, Any]:
     subject.setdefault("header", f"{source.short_org_name or source.org_name}, ОГРН: {source.ogrn}")
     subject.setdefault("shortHeader", source.short_org_name or source.org_name)
     return subject
+
+
+def build_subject_from_source(source: SourceRow) -> dict[str, Any]:
+    """Build the best possible subject using only the migration workbook."""
+    if _is_ip(source):
+        hit: dict[str, Any] = {
+            "person": {
+                "ogrn": source.ogrn,
+                "inn": source.inn,
+            },
+            "nameIP": source.org_name,
+        }
+    else:
+        organization: dict[str, Any] = {
+            "ogrn": source.ogrn,
+            "inn": source.inn,
+            "name": source.org_name,
+            "shortName": source.short_org_name,
+        }
+        if source.organizational_form or source.organizational_form_code:
+            organization["organizationalForm"] = {
+                "code": source.organizational_form_code,
+                "name": source.organizational_form,
+            }
+        registration_address = _address(source.location)
+        if registration_address:
+            organization["registrationAddress"] = registration_address
+        hit = {
+            "organization": organization,
+            "xsdData": {
+                "phone": source.phone,
+                "email": source.email,
+                "factAddress": _address(source.fact_address),
+            },
+        }
+    return build_subject(hit, source)
 
 
 def validate_subject(subject: dict[str, Any]) -> list[str]:

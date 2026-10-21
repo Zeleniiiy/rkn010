@@ -13,10 +13,14 @@ from .mapping import build_license_payload, build_record_payload
 from .models import LicensePlan
 from .runlog import JsonlWriter
 from .state import RunState
-from .subject import build_subject, organisation_name, validate_subject
+from .subject import build_subject, build_subject_from_source, organisation_name, validate_subject
 
 
 class MigrationError(RuntimeError):
+    pass
+
+
+class MigrationSkip(MigrationError):
     pass
 
 
@@ -164,14 +168,14 @@ class Migrator:
         self.operator_mode = operator_mode
         self.organization_id = organization_id
         self.summary = MigrationSummary()
-        self._organization_cache: dict[str, dict[str, Any]] = {}
+        self._organization_cache: dict[str, dict[str, Any] | None] = {}
 
     def _require_client(self) -> PgsClient:
         if self.client is None:
             raise MigrationError("API client is required for live migration")
         return self.client
 
-    def _search_organization(self, plan: LicensePlan) -> dict[str, Any]:
+    def _search_organization(self, plan: LicensePlan) -> dict[str, Any] | None:
         if plan.ogrn in self._organization_cache:
             return self._organization_cache[plan.ogrn]
         client = self._require_client()
@@ -195,7 +199,10 @@ class Migrator:
         )
         hits = _content(result)
         if not hits:
-            raise MigrationError(f"ОГРН {plan.ogrn}: организация не найдена")
+            self._organization_cache[plan.ogrn] = None
+            self.logger.info("ОГРН %s: организация не найдена, используются данные Excel", plan.ogrn)
+            self.events.write("organization_not_found", ogrn=plan.ogrn, fallback="excel")
+            return None
         if len(hits) > 1:
             source_name = _normalise_name(plan.latest.org_name)
 
@@ -339,16 +346,27 @@ class Migrator:
     def _resolve_subject(self, plan: LicensePlan, existing_license: dict[str, Any] | None) -> dict[str, Any]:
         if existing_license and isinstance(existing_license.get("subject"), dict):
             subject = deepcopy(existing_license["subject"])
+            source = "existing_license"
         else:
-            subject = build_subject(self._search_organization(plan), plan.latest)
+            organization = self._search_organization(plan)
+            if organization is None:
+                subject = build_subject_from_source(plan.latest)
+                source = "excel"
+            else:
+                subject = build_subject(organization, plan.latest)
+                source = "organizations"
+        self.events.write("subject_resolved", key=plan.key, source=source)
         missing = validate_subject(subject)
         if missing:
             self.logger.warning(
-                "%s: субъект будет создан с незаполненными полями: %s",
+                "%s: группа пропущена, не заполнены поля субъекта: %s",
                 plan.key,
                 ", ".join(missing),
             )
-            self.events.write("subject_incomplete", key=plan.key, missing_fields=missing)
+            self.events.write("subject_incomplete", key=plan.key, source=source, missing_fields=missing)
+            raise MigrationSkip(
+                f"недостаточно данных субъекта ({source}): {', '.join(missing)}"
+            )
         return subject
 
     def write_dry_run(self, plans: list[LicensePlan], output: Path) -> MigrationSummary:
@@ -370,14 +388,22 @@ class Migrator:
                     )
                     self.summary.groups_failed += 1
                     continue
-                fake_hit = {
-                    "organization": {
-                        "ogrn": plan.ogrn,
-                        "name": plan.latest.org_name,
-                        "shortName": plan.latest.short_org_name,
-                    }
-                }
-                subject = build_subject(fake_hit, plan.latest)
+                subject = build_subject_from_source(plan.latest)
+                missing = validate_subject(subject)
+                if missing:
+                    stream.write(
+                        json.dumps(
+                            {
+                                "kind": "subject_fallback_incomplete",
+                                "key": plan.key,
+                                "excel_row": plan.latest.excel_row,
+                                "missing_fields": missing,
+                                "note": "Live-запуск сначала попытается взять субъект из organizations",
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
                 license_payload = build_license_payload(plan, subject)
                 stream.write(
                     json.dumps(
@@ -426,6 +452,10 @@ class Migrator:
                     self.summary.groups_completed += 1
                     break
                 except Exception as exc:
+                    if isinstance(exc, MigrationSkip):
+                        self._handle_skip(plan, exc)
+                        self.summary.groups_skipped += 1
+                        break
                     self._handle_failure(plan, exc)
                     if not self.operator_mode:
                         self.summary.groups_failed += 1
@@ -439,6 +469,16 @@ class Migrator:
                     self.summary.groups_failed += 1
                     break
         return self.summary
+
+    def _handle_skip(self, plan: LicensePlan, exc: Exception) -> None:
+        self.state.mark_group(plan.key, "skipped", reason=str(exc), excel_row=plan.latest.excel_row)
+        self.events.write(
+            "group_skipped",
+            key=plan.key,
+            excel_row=plan.latest.excel_row,
+            reason=str(exc),
+        )
+        self.logger.warning("%s: %s", plan.key, exc)
 
     def _handle_failure(self, plan: LicensePlan, exc: Exception) -> None:
         self.state.record_error(plan.key, exc)

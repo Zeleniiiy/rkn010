@@ -79,6 +79,9 @@ class RunState:
 
 def rollback(client, state_path: Path, *, dry_run: bool = True) -> dict[str, int]:
     state = json.loads(state_path.read_text(encoding="utf-8"))
+    skipped_groups = sum(
+        1 for group in state.get("groups", {}).values() if group.get("status") == "skipped"
+    )
     restored = 0
     deleted = 0
     if not dry_run:
@@ -94,4 +97,5 @@ def rollback(client, state_path: Path, *, dry_run: bool = True) -> dict[str, int
         "records_to_delete": len(state.get("created", [])),
         "restored": restored,
         "deleted": deleted,
+        "skipped_groups": skipped_groups,
     }

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from rkn010_migration.subject import build_subject, validate_subject
+from rkn010_migration.subject import build_subject, build_subject_from_source, validate_subject
 
 from conftest import full_subject
 
@@ -49,6 +49,18 @@ def test_reports_new_required_legal_entity_fields(source_row):
     assert "xsdData.phone" in missing
     assert "xsdData.email" in missing
     assert "xsdData.factAddress" in missing
+
+
+def test_builds_complete_legal_entity_subject_from_excel(source_row):
+    subject = build_subject_from_source(source_row())
+
+    assert validate_subject(subject) == []
+    assert subject["data"]["organization"]["organizationalForm"] == {
+        "code": "12247",
+        "name": "Публичные акционерные общества",
+    }
+    assert subject["data"]["organization"]["registrationAddress"]["postalCode"] == "420000"
+    assert subject["xsdData"]["factAddress"]["unrecognizablePart"] == "г. Казань"
 
 
 def test_builds_and_validates_ip_subject(source_row):

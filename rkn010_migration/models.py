@@ -12,9 +12,15 @@ class SourceRow:
     source_record_id: str
     regno: str
     ogrn: str
+    inn: str
+    phone: str
+    email: str
+    organizational_form: str
+    organizational_form_code: str
     org_name: str
     short_org_name: str
     location: str
+    fact_address: str
     licence_number_1: str
     licence_date_end_1: datetime | None
     licence_status_1: str

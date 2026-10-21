@@ -126,7 +126,7 @@ def command_run(args) -> int:
     summary = migrator.migrate(plans)
     (run_dir / "summary.json").write_text(json.dumps(summary.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({"mode": "execute", "run_dir": str(run_dir), **summary.to_dict()}, ensure_ascii=False, indent=2))
-    return 2 if summary.groups_failed else 0
+    return 2 if summary.groups_failed or summary.groups_skipped else 0
 
 
 def command_auth(args) -> int:
