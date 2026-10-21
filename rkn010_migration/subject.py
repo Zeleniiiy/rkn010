@@ -197,7 +197,6 @@ def validate_subject(subject: dict[str, Any]) -> list[str]:
                 "data.organization.inn": _dig(subject, "data", "organization", "inn"),
                 "data.organization.registrationAddress": _dig(subject, "data", "organization", "registrationAddress"),
                 "xsdData.phone": _dig(subject, "xsdData", "phone"),
-                "xsdData.email": _dig(subject, "xsdData", "email"),
                 "xsdData.factAddress": _dig(subject, "xsdData", "factAddress"),
             }
         )

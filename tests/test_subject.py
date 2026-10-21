@@ -37,7 +37,7 @@ def test_builds_subject_wrapper_from_organization_card(source_row):
     assert validate_subject(subject) == []
 
 
-def test_reports_new_required_legal_entity_fields(source_row):
+def test_reports_required_legal_entity_fields_but_allows_empty_email(source_row):
     subject = build_subject(
         {"organization": {"ogrn": "1021600000001", "name": "ПАО ТЕСТОВЫЙ ОПЕРАТОР"}},
         source_row(),
@@ -47,7 +47,7 @@ def test_reports_new_required_legal_entity_fields(source_row):
     assert "data.organization.organizationalForm" in missing
     assert "data.organization.registrationAddress" in missing
     assert "xsdData.phone" in missing
-    assert "xsdData.email" in missing
+    assert "xsdData.email" not in missing
     assert "xsdData.factAddress" in missing
 
 
