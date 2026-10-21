@@ -105,6 +105,43 @@ def _preserve_file_metadata(desired: dict[str, Any], existing: Any) -> dict[str,
     return result
 
 
+LICENSE_SLOTS = ("licenceNumber1", "licenceNumber2", "licenceNumber3")
+SERVICE_FLAGS = {
+    "localTelephoneServicesOffered",
+    "fixedIntrazoneServicesOffered",
+    "intercityOrInternationalServicesOffered",
+}
+
+
+def _merge_application_data(desired: Any, existing: Any) -> dict[str, Any]:
+    """Refresh managed licence blocks while retaining NSI metadata already saved by PGS."""
+    desired_map = desired if isinstance(desired, dict) else {}
+    result = deepcopy(existing) if isinstance(existing, dict) else {}
+    for slot in LICENSE_SLOTS:
+        new_block = desired_map.get(slot)
+        if not isinstance(new_block, dict):
+            result[slot] = None
+            continue
+        old_block = result.get(slot)
+        if (
+            isinstance(old_block, dict)
+            and str(old_block.get("lic_num") or "").strip()
+            == str(new_block.get("lic_num") or "").strip()
+        ):
+            merged = deepcopy(old_block)
+            merged.update(deepcopy(new_block))
+            result[slot] = merged
+        else:
+            result[slot] = deepcopy(new_block)
+    for key, value in desired_map.items():
+        if key in LICENSE_SLOTS:
+            continue
+        if key in SERVICE_FLAGS and key in result:
+            continue
+        result[key] = deepcopy(value)
+    return result
+
+
 class Migrator:
     def __init__(
         self,
@@ -193,10 +230,25 @@ class Migrator:
                 candidate_ids=candidate_ids,
             )
         found_name = organisation_name(hits[0])
-        if self.strict_org_name and found_name and _normalise_name(found_name) != _normalise_name(plan.latest.org_name):
-            raise MigrationError(
+        name_mismatch = (
+            bool(found_name)
+            and _normalise_name(found_name) != _normalise_name(plan.latest.org_name)
+        )
+        known_history_rename = any(issue.code == "name_changed" for issue in plan.issues)
+        if name_mismatch:
+            message = (
                 f"ОГРН {plan.ogrn}: наименование в organizations не совпадает с Excel: "
                 f"{found_name!r} != {plan.latest.org_name!r}"
+            )
+            if self.strict_org_name and not known_history_rename:
+                raise MigrationError(message)
+            self.logger.warning(message)
+            self.events.write(
+                "organization_name_mismatch",
+                ogrn=plan.ogrn,
+                organization_name=found_name,
+                excel_name=plan.latest.org_name,
+                accepted_history_rename=known_history_rename,
             )
         self._organization_cache[plan.ogrn] = hits[0]
         return hits[0]
@@ -253,6 +305,37 @@ class Migrator:
         self.events.write("updated", collection=collection, id=document.get("_id"), changes=changes)
         return result if isinstance(result, dict) else updated
 
+    def _sync_record(self, existing: dict[str, Any], desired: dict[str, Any]) -> dict[str, Any]:
+        old_xsd = existing.get("xsdData") if isinstance(existing.get("xsdData"), dict) else {}
+        desired_xsd = desired.get("xsdData") if isinstance(desired.get("xsdData"), dict) else {}
+        merged_xsd = deepcopy(old_xsd)
+        merged_xsd["forRegistry"] = _preserve_file_metadata(
+            desired_xsd.get("forRegistry", {}),
+            old_xsd.get("forRegistry"),
+        )
+        merged_xsd["applicationData"] = _merge_application_data(
+            desired_xsd.get("applicationData"),
+            old_xsd.get("applicationData"),
+        )
+        changes = {
+            key: deepcopy(desired[key])
+            for key in (
+                "number",
+                "status",
+                "subject",
+                "licenseId",
+                "license",
+                "licenseDateIssued",
+                "licenseDateValidTo",
+                "operationType",
+            )
+            if key in desired
+        }
+        changes["xsdData"] = merged_xsd
+        if all(existing.get(key) == value for key, value in changes.items()):
+            return existing
+        return self._update_document(RECORD_COLLECTION, existing, **changes)
+
     def _resolve_subject(self, plan: LicensePlan, existing_license: dict[str, Any] | None) -> dict[str, Any]:
         if existing_license and isinstance(existing_license.get("subject"), dict):
             subject = deepcopy(existing_license["subject"])
@@ -272,6 +355,21 @@ class Migrator:
         output.parent.mkdir(parents=True, exist_ok=True)
         with output.open("w", encoding="utf-8") as stream:
             for plan in plans:
+                errors = [issue for issue in plan.issues if issue.severity == "error"]
+                if errors:
+                    stream.write(
+                        json.dumps(
+                            {
+                                "kind": "error",
+                                "key": plan.key,
+                                "issues": [issue.to_dict() for issue in errors],
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+                    self.summary.groups_failed += 1
+                    continue
                 fake_hit = {
                     "organization": {
                         "ogrn": plan.ogrn,
@@ -298,6 +396,7 @@ class Migrator:
                         record_status="active" if index == len(plan.rows) - 1 else "reissued",
                         license_date_issued=license_payload.get("dateIssued"),
                         license_date_valid_to=license_payload.get("dateValidTo"),
+                        license_date_annulled=license_payload.get("dateAnnulled"),
                     )
                     stream.write(
                         json.dumps(
@@ -353,21 +452,45 @@ class Migrator:
         existing_license = self._find_license(plan)
         subject = self._resolve_subject(plan, existing_license)
 
+        desired_license = build_license_payload(plan, subject)
+        if existing_license:
+            desired_license["dateIssued"] = (
+                existing_license.get("dateIssued")
+                or existing_license.get("dateCreation")
+                or desired_license["dateIssued"]
+            )
+            desired_license["applicationData"] = _merge_application_data(
+                desired_license.get("applicationData"),
+                existing_license.get("applicationData"),
+            )
+
         if existing_license is None:
-            payload = build_license_payload(plan, subject)
-            license_doc = _created_document(client.create(LICENSE_COLLECTION, payload), payload, LICENSE_COLLECTION)
+            license_doc = _created_document(
+                client.create(LICENSE_COLLECTION, desired_license),
+                desired_license,
+                LICENSE_COLLECTION,
+            )
             self.state.record_created(license_doc)
             self.summary.licenses_created += 1
             self.events.write("license_created", key=plan.key, id=license_doc["_id"])
         else:
             license_doc = existing_license
 
+        license_date_issued = license_doc.get("dateIssued") or desired_license["dateIssued"]
+        license_date_valid_to = desired_license["dateValidTo"]
+        existing_annulled_at = license_doc.get("dateAnnulled")
+        license_date_annulled = (
+            existing_annulled_at or desired_license["dateAnnulled"]
+            if desired_license["status"] == "annulled"
+            else None
+        )
+
         license_id = str(license_doc["_id"])
         exact_records: dict[str, dict[str, Any] | None] = {
             row.record_key: self._find_record(license_id, row.regno, row.geo_zone) for row in plan.rows
         }
 
-        historical_to_reissue: list[dict[str, Any]] = []
+        historical_to_reissue: list[tuple[Any, dict[str, Any]]] = []
         for row in plan.rows[:-1]:
             existing = exact_records[row.record_key]
             if existing is None:
@@ -377,17 +500,18 @@ class Migrator:
                     license_id=license_id,
                     license_status=plan.license_status,
                     record_status="reissued",
-                    license_date_issued=license_doc.get("dateIssued"),
-                    license_date_valid_to=license_doc.get("dateValidTo"),
+                    license_date_issued=license_date_issued,
+                    license_date_valid_to=license_date_valid_to,
+                    license_date_annulled=license_date_annulled,
                 )
                 created = _created_document(client.create(RECORD_COLLECTION, payload), payload, RECORD_COLLECTION)
                 self.state.record_created(created)
                 self.summary.records_created += 1
                 self.events.write("record_created", key=row.record_key, id=created["_id"], status="reissued")
-            elif existing.get("status") != "reissued":
+            else:
                 # Keep an existing active record untouched until the new active
                 # record is safely created/promoted below.
-                historical_to_reissue.append(existing)
+                historical_to_reissue.append((row, existing))
 
         latest = plan.latest
         latest_existing = exact_records[latest.record_key]
@@ -402,28 +526,57 @@ class Migrator:
                 license_id=license_id,
                 license_status=plan.license_status,
                 record_status="active",
-                license_date_issued=license_doc.get("dateIssued"),
-                license_date_valid_to=license_doc.get("dateValidTo"),
+                license_date_issued=license_date_issued,
+                license_date_valid_to=license_date_valid_to,
+                license_date_annulled=license_date_annulled,
             )
             latest_doc = _created_document(client.create(RECORD_COLLECTION, payload), payload, RECORD_COLLECTION)
             self.state.record_created(latest_doc)
             self.summary.records_created += 1
             self.events.write("record_created", key=latest.record_key, id=latest_doc["_id"], status="active")
         else:
-            latest_doc = latest_existing
-            if latest_doc.get("status") != "active":
-                latest_doc = self._update_document(RECORD_COLLECTION, latest_doc, status="active")
+            latest_doc = self._sync_record(
+                latest_existing,
+                build_record_payload(
+                    latest,
+                    subject=subject,
+                    license_id=license_id,
+                    license_status=plan.license_status,
+                    record_status="active",
+                    license_date_issued=license_date_issued,
+                    license_date_valid_to=license_date_valid_to,
+                    license_date_annulled=license_date_annulled,
+                ),
+            )
 
-        reissue_by_id = {
-            str(item.get("_id")): item
-            for item in [*old_active, *historical_to_reissue]
+        reissue_by_id: dict[str, tuple[Any | None, dict[str, Any]]] = {
+            str(item.get("_id")): (None, item)
+            for item in old_active
             if str(item.get("_id")) != str(latest_doc.get("_id"))
         }
+        for row, item in historical_to_reissue:
+            if str(item.get("_id")) != str(latest_doc.get("_id")):
+                reissue_by_id[str(item.get("_id"))] = (row, item)
         changed_old: list[dict[str, Any]] = []
         try:
-            for active in reissue_by_id.values():
+            for row, active in reissue_by_id.values():
                 changed_old.append(deepcopy(active))
-                self._update_document(RECORD_COLLECTION, active, status="reissued")
+                if row is None:
+                    self._update_document(RECORD_COLLECTION, active, status="reissued")
+                else:
+                    self._sync_record(
+                        active,
+                        build_record_payload(
+                            row,
+                            subject=subject,
+                            license_id=license_id,
+                            license_status=plan.license_status,
+                            record_status="reissued",
+                            license_date_issued=license_date_issued,
+                            license_date_valid_to=license_date_valid_to,
+                            license_date_annulled=license_date_annulled,
+                        ),
+                    )
         except Exception:
             for before in reversed(changed_old):
                 try:
@@ -437,19 +590,16 @@ class Migrator:
                     self.logger.exception("Compensation failed for new record %s", latest_doc.get("_id"))
             raise
 
-        desired_license = build_license_payload(plan, subject)
-        existing_annulled_at = license_doc.get("dateAnnulled")
         desired_for_registry = _preserve_file_metadata(
             desired_license["forRegistry"], license_doc.get("forRegistry")
         )
         license_changes = {
             "status": desired_license["status"],
             "forRegistry": desired_for_registry,
-            "dateAnnulled": (
-                existing_annulled_at or desired_license["dateAnnulled"]
-                if desired_license["status"] == "annulled"
-                else None
-            ),
+            "applicationData": desired_license["applicationData"],
+            "dateIssued": license_date_issued,
+            "dateValidTo": license_date_valid_to,
+            "dateAnnulled": license_date_annulled,
         }
         if existing_license and any(license_doc.get(key) != value for key, value in license_changes.items()):
             license_doc = self._update_document(LICENSE_COLLECTION, license_doc, **license_changes)

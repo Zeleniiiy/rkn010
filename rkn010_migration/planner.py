@@ -25,11 +25,22 @@ def build_plan(data: WorkbookData) -> list[LicensePlan]:
         if len(names) > 1:
             issues.append(
                 ValidationIssue(
-                    "name_conflict",
-                    "Одинаковые ОГРН и зона содержат разные полные наименования",
+                    "name_changed",
+                    "В истории ОГРН и зоны менялось полное наименование; для лицензии используется последняя строка",
                     rows[0].excel_row,
+                    severity="warning",
                 )
             )
+        for row in rows:
+            for slot, number, date_end, _status in row.licence_slots():
+                if number and date_end is None:
+                    issues.append(
+                        ValidationIssue(
+                            "licence_end_missing",
+                            f"Для {slot} {number!r} не указана дата окончания",
+                            row.excel_row,
+                        )
+                    )
         for row in rows:
             if row.record_key in seen_record_keys:
                 issues.append(

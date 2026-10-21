@@ -20,12 +20,6 @@ RKN_UNIT = {
     "region": {"code": "77", "name": "г. Москва"},
 }
 
-# The source workbook does not contain validity dates yet. The mapper already has
-# the integration point, but live payloads intentionally omit the fields until the
-# customer supplies the columns and confirms their semantics.
-ENABLE_LICENSE_VALIDITY_DATES = False
-
-
 @dataclass(frozen=True)
 class RunSettings:
     profile: str

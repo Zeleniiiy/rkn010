@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from rkn010_migration.mapping import build_for_registry, build_license_payload, build_record_payload
+from rkn010_migration.mapping import (
+    build_for_registry,
+    build_license_payload,
+    build_record_payload,
+)
 from rkn010_migration.models import LicensePlan
 
 from conftest import full_subject
@@ -32,7 +36,17 @@ def test_annulled_license_still_has_active_latest_record(source_row):
     )
     assert license_payload["status"] == "annulled"
     assert license_payload["forRegistry"]["cancellation"][0]["cancellation_num"] == "00000200"
+    assert license_payload["dateValidTo"] == "2029-06-01T00:00:00.000+0000"
+    assert license_payload["applicationData"]["licenceNumber1"] == {
+        "lic_num": "3004",
+        "lic_date_end": "2030-01-01",
+    }
     assert record_payload["status"] == "active"
     assert record_payload["license"]["status"] == "annulled"
     assert record_payload["number"] == "843"
     assert record_payload["xsdData"]["forRegistry"]["regno"] == "00000052"
+    assert record_payload["xsdData"]["applicationData"]["licenceNumber3"] == {
+        "lic_num": "9913",
+        "lic_date_end": "2031-01-01",
+    }
+    assert record_payload["xsdData"]["applicationData"]["geoNumberZoneCode"] == 843

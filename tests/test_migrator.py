@@ -7,9 +7,9 @@ from uuid import uuid4
 
 from rkn010_migration.mapping import build_license_payload, build_record_payload
 from rkn010_migration.migrator import Migrator
-from rkn010_migration.models import LicensePlan
+from rkn010_migration.models import LicensePlan, ValidationIssue
 from rkn010_migration.runlog import JsonlWriter, setup_logging
-from rkn010_migration.state import RunState
+from rkn010_migration.state import RunState, rollback
 
 from conftest import full_subject
 
@@ -149,6 +149,85 @@ def test_second_run_is_idempotent(tmp_path, source_row):
     assert not [op for op in client.operations if op[0] == "create"]
 
 
+def test_existing_documents_receive_application_data_and_keep_nsi_metadata(tmp_path, source_row):
+    row = source_row()
+    plan = LicensePlan(row.license_key, row.ogrn, row.geo_zone, [row], "active")
+    client = FakeClient()
+    subject = full_subject()
+    license_payload = build_license_payload(plan, subject)
+    license_payload["applicationData"]["licenceNumber1"].update(
+        {
+            "code": 156,
+            "lic_date_start": "2021-01-26",
+            "service_name": "Услуги местной телефонной связи",
+        }
+    )
+    license_doc = client.create("RKN010_Licenses", license_payload)
+    record_payload = build_record_payload(
+        row,
+        subject=subject,
+        license_id=license_doc["_id"],
+        license_status="active",
+        record_status="active",
+        license_date_issued=license_doc["dateIssued"],
+        license_date_valid_to=license_doc["dateValidTo"],
+    )
+    record_payload["xsdData"] = {"forRegistry": record_payload["xsdData"]["forRegistry"]}
+    record_doc = client.create("RKN010_Records", record_payload)
+    client.operations.clear()
+
+    summary = make_migrator(tmp_path, client, "sync-application-data").migrate([plan])
+
+    assert summary.groups_completed == 1
+    saved_license = client.collections["RKN010_Licenses"][0]
+    assert saved_license["applicationData"]["licenceNumber1"]["code"] == 156
+    assert saved_license["applicationData"]["licenceNumber1"]["lic_date_start"] == "2021-01-26"
+    saved_record = next(item for item in client.collections["RKN010_Records"] if item["_id"] == record_doc["_id"])
+    assert saved_record["xsdData"]["applicationData"]["licenceNumber1"]["lic_num"] == "3004"
+    assert saved_record["licenseDateValidTo"] == "2029-06-01T00:00:00.000+0000"
+
+
+def test_rollback_restores_documents_after_schema_sync(tmp_path, source_row):
+    older = source_row(regno="00000052")
+    latest = source_row(excel_row=5, regno="00000092", include_order_number="101")
+    plan = LicensePlan(older.license_key, older.ogrn, older.geo_zone, [older, latest], "active")
+    client = FakeClient()
+    subject = full_subject()
+    original_license = client.create(
+        "RKN010_Licenses",
+        build_license_payload(
+            LicensePlan(older.license_key, older.ogrn, older.geo_zone, [older], "active"),
+            subject,
+        ),
+    )
+    original_record = client.create(
+        "RKN010_Records",
+        build_record_payload(
+            older,
+            subject=subject,
+            license_id=original_license["_id"],
+            license_status="active",
+            record_status="active",
+            license_date_issued=original_license["dateIssued"],
+            license_date_valid_to=original_license["dateValidTo"],
+        ),
+    )
+    before_license = deepcopy(original_license)
+    before_record = deepcopy(original_record)
+    run_dir = tmp_path / "rollback-flow"
+
+    make_migrator(tmp_path, client, "rollback-flow").migrate([plan])
+    assert len(client.collections["RKN010_Records"]) == 2
+    assert client.collections["RKN010_Records"][0]["status"] == "reissued"
+
+    result = rollback(client, run_dir / "checkpoint.json", dry_run=False)
+
+    assert result["restored"] == 2
+    assert result["deleted"] == 1
+    assert client.collections["RKN010_Licenses"] == [before_license]
+    assert client.collections["RKN010_Records"] == [before_record]
+
+
 def test_incomplete_subject_is_created_with_warning(tmp_path, source_row):
     row = source_row()
     plan = LicensePlan(row.license_key, row.ogrn, row.geo_zone, [row], "active")
@@ -201,3 +280,22 @@ def test_duplicate_organizations_selects_most_complete_subject(tmp_path, source_
     events = (run_dir / "events.jsonl").read_text(encoding="utf-8")
     assert '"event": "organization_duplicate_selected"' in events
     assert '"selected_id": "complete"' in events
+
+
+def test_known_historical_rename_does_not_block_subject_lookup(tmp_path, source_row):
+    row = source_row(org_name="ОАО ТЕСТОВЫЙ ОПЕРАТОР")
+    plan = LicensePlan(
+        row.license_key,
+        row.ogrn,
+        row.geo_zone,
+        [row],
+        "active",
+        issues=[ValidationIssue("name_changed", "Историческое переименование", severity="warning")],
+    )
+    client = FakeClient()
+
+    summary = make_migrator(tmp_path, client, "historical-rename").migrate([plan])
+
+    assert summary.groups_completed == 1
+    events = (tmp_path / "historical-rename" / "events.jsonl").read_text(encoding="utf-8")
+    assert '"event": "organization_name_mismatch"' in events

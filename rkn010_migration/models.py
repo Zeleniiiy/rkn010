@@ -16,8 +16,14 @@ class SourceRow:
     short_org_name: str
     location: str
     licence_number_1: str
+    licence_date_end_1: datetime | None
+    licence_status_1: str
     licence_number_2: str
+    licence_date_end_2: datetime | None
+    licence_status_2: str
     licence_number_3: str
+    licence_date_end_3: datetime | None
+    licence_status_3: str
     geo_zone: str
     include_order_number: str
     include_order_date: datetime | None
@@ -36,6 +42,13 @@ class SourceRow:
     @property
     def is_annulled(self) -> bool:
         return bool(self.exclude_order_number or self.exclude_order_date)
+
+    def licence_slots(self) -> tuple[tuple[str, str, datetime | None, str], ...]:
+        return (
+            ("licenceNumber1", self.licence_number_1, self.licence_date_end_1, self.licence_status_1),
+            ("licenceNumber2", self.licence_number_2, self.licence_date_end_2, self.licence_status_2),
+            ("licenceNumber3", self.licence_number_3, self.licence_date_end_3, self.licence_status_3),
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

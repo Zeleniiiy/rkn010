@@ -28,3 +28,16 @@ def test_latest_exclusion_annuls_license_only(source_row):
     )
     plan = build_plan(WorkbookData("x", "РОСЗСП", [latest, older], []))[0]
     assert plan.license_status == "annulled"
+
+
+def test_name_change_is_warning_but_missing_licence_end_blocks_group(source_row):
+    older = source_row(org_name="ОАО ТЕСТ")
+    latest = source_row(
+        excel_row=5,
+        regno="2",
+        org_name="ПАО ТЕСТ",
+        licence_date_end_2=None,
+    )
+    plan = build_plan(WorkbookData("x", "РОСЗСП", [older, latest], []))[0]
+    assert any(issue.code == "name_changed" and issue.severity == "warning" for issue in plan.issues)
+    assert any(issue.code == "licence_end_missing" and issue.severity == "error" for issue in plan.issues)

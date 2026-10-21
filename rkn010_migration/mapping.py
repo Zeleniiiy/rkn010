@@ -5,11 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from .config import (
-    ENABLE_LICENSE_VALIDITY_DATES,
-    REGISTRY_ENTRY_TYPE,
-    RKN_UNIT,
-)
+from .config import REGISTRY_ENTRY_TYPE, RKN_UNIT
 from .models import LicensePlan, SourceRow
 
 
@@ -25,6 +21,16 @@ def esnsi_date(value: datetime | None) -> str:
 
 def now_utc() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def now_utc_offset() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:23] + "+0000"
+
+
+def iso_utc_midnight(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.strftime("%Y-%m-%dT00:00:00.000+0000")
 
 
 def licence_number_esnsi(row: SourceRow) -> str:
@@ -54,6 +60,7 @@ def build_for_registry(row: SourceRow) -> dict[str, Any]:
             if row.expert_opinion_date
             else []
         ),
+        "cancellation": [],
         "short_org_name": row.short_org_name,
         "licenceNumberESNSI": licence_number_esnsi(row),
     }
@@ -75,7 +82,44 @@ def build_for_registry(row: SourceRow) -> dict[str, Any]:
     return result
 
 
+def build_license_application_data(row: SourceRow) -> dict[str, dict[str, Any] | None]:
+    """Build the three licence dictionary blocks used by licenses and records."""
+    result: dict[str, dict[str, Any] | None] = {}
+    for slot, number, date_end, _status in row.licence_slots():
+        if not number:
+            result[slot] = None
+            continue
+        if date_end is None:
+            raise ValueError(
+                f"Строка Excel {row.excel_row}: не указана дата окончания {slot} {number!r}"
+            )
+        result[slot] = {
+            "lic_num": number,
+            "lic_date_end": date_end.strftime("%Y-%m-%d"),
+        }
+    return result
+
+
+def build_record_application_data(row: SourceRow) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "geoNumberZoneCode": int(row.geo_zone),
+        "localTelephoneServicesOffered": True if row.licence_number_1 else None,
+        "fixedIntrazoneServicesOffered": True if row.licence_number_2 else None,
+        "intercityOrInternationalServicesOffered": True if row.licence_number_3 else None,
+    }
+    result.update(build_license_application_data(row))
+    return result
+
+
+def license_valid_to(row: SourceRow) -> str:
+    dates = [date_end for _slot, number, date_end, _status in row.licence_slots() if number and date_end]
+    if not dates:
+        raise ValueError(f"Строка Excel {row.excel_row}: нет сроков окончания лицензий")
+    return iso_utc_midnight(min(dates)) or ""
+
+
 def build_license_payload(plan: LicensePlan, subject: dict[str, Any]) -> dict[str, Any]:
+    issued_at = now_utc_offset()
     payload: dict[str, Any] = {
         "guid": str(uuid4()),
         "unit": deepcopy(RKN_UNIT),
@@ -83,22 +127,18 @@ def build_license_payload(plan: LicensePlan, subject: dict[str, Any]) -> dict[st
         "number": plan.geo_zone,
         "status": plan.license_status,
         "subject": deepcopy(subject),
-        # Validity start is not present in the source workbook. Server-side
-        # dateCreation is separate and will be populated by PGS automatically.
-        "dateIssued": None,
-        "dateValidTo": None,
+        "date": issued_at,
+        # The live process uses the entity creation moment as dateIssued and
+        # the earliest lic_date_end among the included licence blocks as dateValidTo.
+        "dateIssued": issued_at,
+        "dateValidTo": license_valid_to(plan.latest),
         "forRegistry": build_for_registry(plan.latest),
+        "applicationData": build_license_application_data(plan.latest),
         "historyData": [],
         "dateAnnulled": now_utc() if plan.license_status == "annulled" else None,
         "parentEntries": "RKN010_Licenses",
         "registryEntryType": deepcopy(REGISTRY_ENTRY_TYPE),
     }
-    if ENABLE_LICENSE_VALIDITY_DATES:
-        # TODO(RKN010): map confirmed validity columns here when they are added
-        # to the workbook. Do not infer perpetual licenses from an empty date.
-        # payload["dateIssued"] = iso_moscow(plan.latest.valid_from)
-        # payload["dateValidTo"] = iso_moscow(plan.latest.valid_to)
-        raise NotImplementedError("License validity columns are not confirmed")
     return payload
 
 
@@ -111,6 +151,7 @@ def build_record_payload(
     record_status: str,
     license_date_issued: str | None = None,
     license_date_valid_to: str | None = None,
+    license_date_annulled: str | None = None,
 ) -> dict[str, Any]:
     return {
         "guid": str(uuid4()),
@@ -125,9 +166,15 @@ def build_record_payload(
             "status": license_status,
             "dateIssued": license_date_issued,
             "dateValidTo": license_date_valid_to,
+            "dateAnnulled": license_date_annulled,
         },
+        "licenseDateIssued": license_date_issued,
+        "licenseDateValidTo": license_date_valid_to,
         "parentEntries": "RKN010_Records",
         "registryEntryType": deepcopy(REGISTRY_ENTRY_TYPE),
         "operationType": "registration",
-        "xsdData": {"forRegistry": build_for_registry(row)},
+        "xsdData": {
+            "forRegistry": build_for_registry(row),
+            "applicationData": build_record_application_data(row),
+        },
     }

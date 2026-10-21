@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from datetime import date, datetime, time, timezone
 from pathlib import Path
 from typing import Any
@@ -20,8 +21,14 @@ HEADER_ALIASES: dict[str, tuple[str, ...]] = {
     "short_org_name": ("сокращенное наименование", "сокращенное"),
     "location": ("место нахождения",),
     "licence_number_1": ("n1", "licencenumber1", "licence number 1"),
+    "licence_date_end_1": ("дата начала и окончания лицензии_1", "дата окончания лицензии_1"),
+    "licence_status_1": ("статус_1", "статус 1"),
     "licence_number_2": ("n2", "licencenumber2", "licence number 2"),
+    "licence_date_end_2": ("дата начала и окончания лицензии_2", "дата окончания лицензии_2"),
+    "licence_status_2": ("статус_2", "статус 2"),
     "licence_number_3": ("n3", "licencenumber3", "licence number 3"),
+    "licence_date_end_3": ("дата начала и окончания лицензии_3", "дата окончания лицензии_3"),
+    "licence_status_3": ("статус_3", "статус 3"),
     "geo_zone": ("зона нумерации", "зона", "geo_zone"),
     "include_order_number": ("номер приказа о включении", "№ приказа о включении"),
     "include_order_date": ("дата приказа о включении",),
@@ -36,13 +43,23 @@ HEADER_PATTERNS: dict[str, str] = {
     "short_org_name": r"^сокращенное наименование оператора",
     "location": r"^место нахождения",
     "licence_number_1": r"^номера лицензий n1",
+    "licence_date_end_1": r"^дата (?:начала и )?окончания лицензии ?1$",
+    "licence_status_1": r"^статус ?1$",
     "licence_number_2": r"^номера лицензий n2",
+    "licence_date_end_2": r"^дата (?:начала и )?окончания лицензии ?2$",
+    "licence_status_2": r"^статус ?2$",
     "licence_number_3": r"^номера лицензий n3",
+    "licence_date_end_3": r"^дата (?:начала и )?окончания лицензии ?3$",
+    "licence_status_3": r"^статус ?3$",
     "geo_zone": r"^географически определенная зона нумерации",
     "include_order_number": r"^№ приказа о включении в реестр",
     "include_order_date": r"^дата приказа о включении в реестр",
     "exclude_order_number": r"^№ приказа об исключении из реестра",
     "exclude_order_date": r"^дата приказа об исключении из реестра",
+}
+
+OPTIONAL_COLUMNS = {
+    "expert_opinion_date",
 }
 
 REQUIRED_FIELDS = {
@@ -83,6 +100,10 @@ def _text(value: Any) -> str:
     if isinstance(value, float) and value.is_integer():
         return str(int(value))
     return str(value).strip()
+
+
+def _license_number(value: Any) -> str:
+    return re.sub(r"[;,]+$", "", _text(value)).strip()
 
 
 def _date(value: Any, *, epoch: datetime) -> datetime | None:
@@ -137,12 +158,45 @@ def _find_header(ws) -> tuple[int, dict[str, int]]:
         raise WorkbookValidationError(
             [ValidationIssue("header_not_found", "Не удалось найти строку заголовков")]
         )
-    missing = sorted(set(HEADER_ALIASES) - set(best[1]))
+    missing = sorted(set(HEADER_ALIASES) - OPTIONAL_COLUMNS - set(best[1]))
     if missing:
         raise WorkbookValidationError(
             [ValidationIssue("missing_columns", f"Отсутствуют столбцы: {', '.join(missing)}")]
         )
     return best
+
+
+def _license_date_and_status(
+    date_value: Any,
+    status_value: Any,
+    *,
+    epoch: datetime,
+) -> tuple[datetime | None, str]:
+    """Read the final workbook where N03 date/status are often interchanged."""
+    known_statuses = {"действующая", "недействующая"}
+    values = (date_value, status_value)
+    status = next(
+        (
+            _text(value).casefold()
+            for value in values
+            if _text(value).casefold() in known_statuses
+        ),
+        "",
+    )
+    for value in values:
+        if value in (None, "") or _text(value).casefold() in known_statuses:
+            continue
+        candidate = value
+        if isinstance(value, str):
+            match = re.search(r"\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[./]\d{1,2}[./]\d{2,4}", value)
+            if not match:
+                continue
+            candidate = match.group(0).replace("/", ".")
+        try:
+            return _date(candidate, epoch=epoch), status
+        except ValueError:
+            continue
+    return None, status
 
 
 def read_workbook(path: str | Path, sheet_name: str | None = None) -> WorkbookData:
@@ -162,7 +216,12 @@ def read_workbook(path: str | Path, sheet_name: str | None = None) -> WorkbookDa
         raw = {field: ws.cell(row_number, col).value for field, col in columns.items()}
         if not any(value not in (None, "") for value in raw.values()):
             continue
-        values = {field: _text(value) for field, value in raw.items()}
+        values = {
+            field: _text(raw.get(field))
+            for field in HEADER_ALIASES
+        }
+        for slot in (1, 2, 3):
+            values[f"licence_number_{slot}"] = _license_number(raw.get(f"licence_number_{slot}"))
         for field in REQUIRED_FIELDS:
             if not values[field]:
                 issues.append(ValidationIssue("required", f"Пустое обязательное поле {field}", row_number))
@@ -183,10 +242,18 @@ def read_workbook(path: str | Path, sheet_name: str | None = None) -> WorkbookDa
             issues.append(ValidationIssue("exclude_date_format", str(exc), row_number))
             exclude_date = None
         try:
-            opinion_date = _date(raw["expert_opinion_date"], epoch=wb.epoch)
+            opinion_date = _date(raw.get("expert_opinion_date"), epoch=wb.epoch)
         except ValueError as exc:
             issues.append(ValidationIssue("opinion_date_format", str(exc), row_number))
             opinion_date = None
+        licence_dates: dict[int, datetime | None] = {}
+        licence_statuses: dict[int, str] = {}
+        for slot in (1, 2, 3):
+            licence_dates[slot], licence_statuses[slot] = _license_date_and_status(
+                raw.get(f"licence_date_end_{slot}"),
+                raw.get(f"licence_status_{slot}"),
+                epoch=wb.epoch,
+            )
         if bool(values["exclude_order_number"]) != bool(exclude_date):
             issues.append(ValidationIssue("cancellation_pair", "Номер и дата приказа об исключении должны быть заполнены вместе", row_number))
         rows.append(
@@ -200,8 +267,14 @@ def read_workbook(path: str | Path, sheet_name: str | None = None) -> WorkbookDa
                 short_org_name=values["short_org_name"],
                 location=values["location"],
                 licence_number_1=values["licence_number_1"],
+                licence_date_end_1=licence_dates[1],
+                licence_status_1=licence_statuses[1],
                 licence_number_2=values["licence_number_2"],
+                licence_date_end_2=licence_dates[2],
+                licence_status_2=licence_statuses[2],
                 licence_number_3=values["licence_number_3"],
+                licence_date_end_3=licence_dates[3],
+                licence_status_3=licence_statuses[3],
                 geo_zone=values["geo_zone"],
                 include_order_number=values["include_order_number"],
                 include_order_date=include_date,
@@ -210,6 +283,42 @@ def read_workbook(path: str | Path, sheet_name: str | None = None) -> WorkbookDa
                 expert_opinion_date=opinion_date,
             )
         )
+
+    dates_by_number: dict[str, set[datetime]] = {}
+    for row in rows:
+        for _slot, number, date_end, _status in row.licence_slots():
+            if number and date_end:
+                dates_by_number.setdefault(number, set()).add(date_end)
+
+    enriched_rows: list[SourceRow] = []
+    for row in rows:
+        changes: dict[str, datetime] = {}
+        for slot_number, (_slot, number, date_end, _status) in enumerate(row.licence_slots(), 1):
+            if not number or date_end is not None:
+                continue
+            known_dates = dates_by_number.get(number, set())
+            if len(known_dates) == 1:
+                inferred = next(iter(known_dates))
+                changes[f"licence_date_end_{slot_number}"] = inferred
+                issues.append(
+                    ValidationIssue(
+                        "licence_end_inferred",
+                        f"Дата окончания licenceNumber{slot_number} восстановлена по тому же номеру лицензии: {inferred:%d.%m.%Y}",
+                        row.excel_row,
+                        severity="warning",
+                    )
+                )
+            else:
+                issues.append(
+                    ValidationIssue(
+                        "licence_end_missing",
+                        f"Не указана дата окончания licenceNumber{slot_number}",
+                        row.excel_row,
+                        severity="warning",
+                    )
+                )
+        enriched_rows.append(replace(row, **changes) if changes else row)
+    rows = enriched_rows
 
     if not rows:
         issues.append(ValidationIssue("no_rows", "В таблице нет строк данных"))
