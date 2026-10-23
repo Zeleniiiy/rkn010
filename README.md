@@ -144,6 +144,11 @@ Dry-run для PSI:
 .venv\Scripts\python.exe -m rkn010_migration rollback --profile psi --state "runs\psi\...\checkpoint.json" --execute
 ```
 
+Фактический откат сохраняет прогресс в самом `checkpoint.json` и создаёт рядом
+`rollback-report.json`. Если выполнение прервётся, повторная команда продолжит
+откат с незавершённого документа. После статуса `completed` повторный запуск
+безопасно завершится без повторных изменений.
+
 То же через профильные PowerShell-обёртки:
 
 ```powershell
